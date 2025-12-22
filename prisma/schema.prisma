@@ -1,0 +1,180 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            Int       @id @default(autoincrement())
+  email         String    @unique
+  password      String
+  name          String?
+  createdAt     DateTime  @default(now())
+  emailVerified Boolean   @default(false)
+  notificationsEnabled Boolean @default(true)
+  role          Role      @default(USER)
+  image         String?
+  bookings      Booking[]
+  otpCodes      OtpCode[]
+  paymentMethods PaymentMethod[]
+  sentMessages  ChatMessage[] @relation("MessageSender")
+  conversations ChatConversation[]
+}
+
+model OtpCode {
+  id         String     @id @default(cuid())
+  userId     Int
+  purpose    OtpPurpose
+  codeHash   String
+  attempts   Int        @default(0)
+  lastSentAt DateTime   @default(now())
+  expiresAt  DateTime
+  createdAt  DateTime   @default(now())
+  user       User       @relation(fields: [userId], references: [id])
+
+  @@unique([userId, purpose])
+}
+
+model ResourceType {
+  id          Int        @id @default(autoincrement())
+  name        String     @unique
+  label       String
+  description String?
+  icon        String?
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  resources   Resource[]
+}
+
+model Resource {
+  id             Int                @id @default(autoincrement())
+  code           String             @unique
+  title          String
+  description    String?
+  capacity       Int?
+  meta           Json?
+  createdAt      DateTime           @default(now())
+  image          String?
+  locationText   String?
+  latitude       Float?
+  longitude      Float?
+  resourceTypeId Int?
+  price          Float              @default(50.0)
+  bookings       Booking[]
+  resourceType   ResourceType?      @relation(fields: [resourceTypeId], references: [id])
+  schedules      ResourceSchedule[]
+}
+
+model ResourceSchedule {
+  id          Int      @id @default(autoincrement())
+  resourceId  Int
+  startTime   DateTime
+  endTime     DateTime
+  isAvailable Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  resource    Resource @relation(fields: [resourceId], references: [id])
+}
+
+model Booking {
+  id         Int           @id @default(autoincrement())
+  userId     Int
+  resourceId Int
+  startTime  DateTime
+  endTime    DateTime
+  status     BookingStatus @default(PENDING)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  resource   Resource      @relation(fields: [resourceId], references: [id])
+  user       User          @relation(fields: [userId], references: [id])
+  payment    Payment?
+}
+
+model Payment {
+  id              String   @id @default(cuid())
+  bookingId       Int      @unique
+  stripePaymentId String   @unique
+  amount          Float
+  currency        String   @default("usd")
+  status          String
+  paymentMethod   String?
+  paymentMethodId String?
+  paymentMethodDetails PaymentMethod? @relation(fields: [paymentMethodId], references: [id])
+  description     String?
+  metadata        Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  booking         Booking  @relation(fields: [bookingId], references: [id])
+}
+
+model PaymentMethod {
+  id                String   @id
+  userId            Int
+  type              String
+  brand             String?
+  last4             String?
+  expMonth          Int?
+  expYear           Int?
+  funding           String?
+  country           String?
+  billingPostalCode String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user     User     @relation(fields: [userId], references: [id])
+  payments Payment[]
+
+  @@index([userId])
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELED
+}
+
+enum OtpPurpose {
+  REGISTER
+  LOGIN
+  RESET_PASSWORD
+}
+
+enum Role {
+  ADMIN
+  USER
+}
+
+model ChatConversation {
+  id           Int           @id @default(autoincrement())
+  userId       Int
+  status       ConversationStatus @default(ACTIVE)
+  lastMessageAt DateTime     @default(now())
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  user         User          @relation(fields: [userId], references: [id])
+  messages     ChatMessage[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model ChatMessage {
+  id             Int              @id @default(autoincrement())
+  conversationId Int
+  senderId       Int
+  content        String
+  isRead         Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User             @relation("MessageSender", fields: [senderId], references: [id])
+
+  @@index([conversationId])
+  @@index([senderId])
+}
+
+enum ConversationStatus {
+  ACTIVE
+  CLOSED
+}

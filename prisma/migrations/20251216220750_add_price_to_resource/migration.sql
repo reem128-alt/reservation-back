@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Resource" ADD COLUMN     "price" DOUBLE PRECISION NOT NULL DEFAULT 50.0;
