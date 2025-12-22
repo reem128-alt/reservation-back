@@ -2,9 +2,21 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ValidationPipe } from '@nestjs/common';
+import { CustomLoggerService } from './shared/logger/logger.service';
+import { LoggingInterceptor } from './shared/interceptors/logging.interceptor';
+import { AllExceptionsFilter } from './shared/filters/http-exception.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true,
+  });
+
+  const logger = app.get(CustomLoggerService);
+  logger.setContext('Bootstrap');
+  app.useLogger(logger);
+
+  app.useGlobalInterceptors(new LoggingInterceptor(logger));
+  app.useGlobalFilters(new AllExceptionsFilter(logger));
 
   // Enable validation
   app.useGlobalPipes(new ValidationPipe({
@@ -37,7 +49,10 @@ async function bootstrap() {
 
   const port = process.env.PORT ?? 5000;
   await app.listen(port);
-  console.log(`Application is running on: http://localhost:${port}`);
-  console.log(`Swagger documentation: http://localhost:${port}/api`);
+  logger.log(`Application is running on: http://localhost:${port}`);
+  logger.log(`Swagger documentation: http://localhost:${port}/api`);
 }
-bootstrap();
+bootstrap().catch((error) => {
+  console.error('Failed to start application:', error);
+  process.exit(1);
+});

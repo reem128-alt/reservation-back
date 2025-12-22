@@ -1,0 +1,50 @@
+import { Injectable, LoggerService, Scope } from '@nestjs/common';
+
+@Injectable({ scope: Scope.TRANSIENT })
+export class CustomLoggerService implements LoggerService {
+  private context?: string;
+
+  setContext(context: string) {
+    this.context = context;
+  }
+
+  log(message: any, context?: string) {
+    const timestamp = new Date().toISOString();
+    const ctx = context || this.context || 'Application';
+    console.log(`[${timestamp}] [LOG] [${ctx}] ${this.formatMessage(message)}`);
+  }
+
+  error(message: any, trace?: string, context?: string) {
+    const timestamp = new Date().toISOString();
+    const ctx = context || this.context || 'Application';
+    console.error(`[${timestamp}] [ERROR] [${ctx}] ${this.formatMessage(message)}`);
+    if (trace) {
+      console.error(`[${timestamp}] [ERROR] [${ctx}] Stack Trace: ${trace}`);
+    }
+  }
+
+  warn(message: any, context?: string) {
+    const timestamp = new Date().toISOString();
+    const ctx = context || this.context || 'Application';
+    console.warn(`[${timestamp}] [WARN] [${ctx}] ${this.formatMessage(message)}`);
+  }
+
+  debug(message: any, context?: string) {
+    const timestamp = new Date().toISOString();
+    const ctx = context || this.context || 'Application';
+    console.debug(`[${timestamp}] [DEBUG] [${ctx}] ${this.formatMessage(message)}`);
+  }
+
+  verbose(message: any, context?: string) {
+    const timestamp = new Date().toISOString();
+    const ctx = context || this.context || 'Application';
+    console.log(`[${timestamp}] [VERBOSE] [${ctx}] ${this.formatMessage(message)}`);
+  }
+
+  private formatMessage(message: any): string {
+    if (typeof message === 'object') {
+      return JSON.stringify(message, null, 2);
+    }
+    return String(message);
+  }
+}

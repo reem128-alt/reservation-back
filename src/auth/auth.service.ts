@@ -5,6 +5,7 @@ import * as bcrypt from 'bcrypt';
 import { CreateUserDto, Role } from '../shared/dto/create-user.dto';
 import { LoginDto } from '../shared/dto/login.dto';
 import { NotificationService } from '../notification/notification.service';
+import { CustomLoggerService } from '../shared/logger/logger.service';
 
 @Injectable()
 export class AuthService {
@@ -12,7 +13,10 @@ export class AuthService {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private notificationService: NotificationService,
-  ) {}
+    private logger: CustomLoggerService,
+  ) {
+    this.logger.setContext('AuthService');
+  }
 
   private generateOtpCode(): string {
     return Math.floor(100000 + Math.random() * 900000).toString();
@@ -58,12 +62,15 @@ export class AuthService {
   async register(createUserDto: CreateUserDto) {
     const { email, password, name, role = Role.USER } = createUserDto;
 
+    this.logger.log(`Registration attempt for email: ${email}`);
+
     // Check if user exists
     const existingUser = await this.prisma.user.findUnique({
       where: { email },
     });
 
     if (existingUser) {
+      this.logger.warn(`Registration failed: User already exists - ${email}`);
       throw new UnauthorizedException('User already exists');
     }
 
@@ -80,7 +87,9 @@ export class AuthService {
       },
     });
 
+    this.logger.log(`User registered successfully: ${user.email} (ID: ${user.id})`);
     await this.issueOtp(user.id, user.email, 'REGISTER');
+    this.logger.log(`OTP sent for registration: ${user.email}`);
 
     return {
       message: 'OTP code sent to your email',
@@ -96,12 +105,15 @@ export class AuthService {
   async login(loginDto: LoginDto) {
     const { email, password } = loginDto;
 
+    this.logger.log(`Login attempt for email: ${email}`);
+
     // Find user
     const user = (await this.prisma.user.findUnique({
       where: { email },
     })) as any;
 
     if (!user) {
+      this.logger.warn(`Login failed: User not found - ${email}`);
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -109,10 +121,12 @@ export class AuthService {
     const isPasswordValid = await bcrypt.compare(password, user.password);
 
     if (!isPasswordValid) {
+      this.logger.warn(`Login failed: Invalid password - ${email}`);
       throw new UnauthorizedException('Invalid credentials');
     }
 
     await this.issueOtp(user.id, user.email, 'LOGIN');
+    this.logger.log(`OTP sent for login: ${user.email}`);
     return {
       message: 'OTP code sent to your email',
       id: user.id,
@@ -125,11 +139,14 @@ export class AuthService {
   }
 
   async verifyOtp(email: string, code: string, purpose: 'REGISTER' | 'LOGIN' | 'RESET_PASSWORD') {
+    this.logger.log(`OTP verification attempt for email: ${email}, purpose: ${purpose}`);
+
     const user = (await this.prisma.user.findUnique({
       where: { email },
     })) as any;
 
     if (!user) {
+      this.logger.warn(`OTP verification failed: User not found - ${email}`);
       throw new UnauthorizedException('Invalid OTP');
     }
 
@@ -143,14 +160,17 @@ export class AuthService {
     });
 
     if (!otp) {
+      this.logger.warn(`OTP verification failed: No OTP found - ${email}`);
       throw new UnauthorizedException('Invalid OTP');
     }
 
     if (otp.expiresAt.getTime() < Date.now()) {
+      this.logger.warn(`OTP verification failed: OTP expired - ${email}`);
       throw new UnauthorizedException('OTP expired');
     }
 
     if (otp.attempts >= 5) {
+      this.logger.warn(`OTP verification failed: Too many attempts - ${email}`);
       throw new UnauthorizedException('Too many attempts');
     }
 
@@ -160,8 +180,11 @@ export class AuthService {
         where: { id: otp.id },
         data: { attempts: otp.attempts + 1 },
       });
+      this.logger.warn(`OTP verification failed: Invalid code - ${email} (Attempt ${otp.attempts + 1})`);
       throw new UnauthorizedException('Invalid OTP');
     }
+
+    this.logger.log(`OTP verified successfully for ${email}`);
 
     if (purpose === 'RESET_PASSWORD') {
       await this.prisma.otpCode.delete({
@@ -188,6 +211,7 @@ export class AuthService {
       email: user.email,
       role: user.role 
     });
+    this.logger.log(`JWT token generated for user: ${user.email}`);
     return {
       id: user.id,
       email: user.email,
@@ -244,16 +268,20 @@ export class AuthService {
   }
 
   async changePassword(userId: number, oldPassword: string, newPassword: string) {
+    this.logger.log(`Password change attempt for user ID: ${userId}`);
+
     const user = (await this.prisma.user.findUnique({
       where: { id: userId },
     })) as any;
 
     if (!user) {
+      this.logger.warn(`Password change failed: User not found - ID: ${userId}`);
       throw new UnauthorizedException('User not found');
     }
 
     const ok = await bcrypt.compare(oldPassword, user.password);
     if (!ok) {
+      this.logger.warn(`Password change failed: Incorrect old password - User ID: ${userId}`);
       throw new UnauthorizedException('Old password is incorrect');
     }
 
@@ -262,6 +290,8 @@ export class AuthService {
       where: { id: userId },
       data: { password: hashedPassword },
     });
+
+    this.logger.log(`Password changed successfully for user ID: ${userId}`);
 
     return {
       message: "password changed successfully",

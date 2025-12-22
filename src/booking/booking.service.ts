@@ -10,6 +10,7 @@ import type {
   BookingCanceledEvent 
 } from '../shared/events/booking.events';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { CustomLoggerService } from '../shared/logger/logger.service';
 
 @Injectable()
 export class BookingService {
@@ -18,10 +19,16 @@ export class BookingService {
     private availabilityService: AvailabilityService,
     private paymentService: PaymentService,
     private eventEmitter: EventEmitter2,
-  ) {}
+    private logger: CustomLoggerService,
+  ) {
+    this.logger.setContext('BookingService');
+  }
 
   async create(userId: number, createBookingDto: CreateBookingDto) {
     const { resourceId, startTime, endTime, paymentMethodId } = createBookingDto;
+
+    this.logger.log(`Creating booking for user ${userId}, resource ${resourceId}`);
+    this.logger.debug(`Booking details: ${JSON.stringify({ startTime, endTime, paymentMethodId: paymentMethodId ? 'provided' : 'not provided' })}`);
 
     // Check availability first
     const availability = await this.availabilityService.checkAvailability(
@@ -31,6 +38,7 @@ export class BookingService {
     );
 
     if (!availability.available) {
+      this.logger.warn(`Booking creation failed: Resource ${resourceId} not available for requested time slot`);
       throw new BadRequestException('Resource is not available for the requested time slot');
     }
 
@@ -40,6 +48,7 @@ export class BookingService {
     });
 
     if (!resource) {
+      this.logger.error(`Booking creation failed: Resource ${resourceId} not found`);
       throw new NotFoundException('Resource not found');
     }
 
@@ -49,8 +58,11 @@ export class BookingService {
     const durationInHours = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
     const amount = durationInHours * resource.price;
 
+    this.logger.log(`Calculated booking amount: $${amount} (${durationInHours} hours @ $${resource.price}/hour)`);
+
     // If no payment method provided, return payment intent for client confirmation
     if (!paymentMethodId) {
+      this.logger.warn(`Booking creation paused: Payment method not provided for user ${userId}`);
       // Create a temporary booking record or return payment details
       return {
         requiresPayment: true,
@@ -66,6 +78,7 @@ export class BookingService {
     }
 
     // Process payment FIRST before creating booking
+    this.logger.log(`Processing payment for booking: User ${userId}, Amount $${amount}`);
     let paymentResult;
     try {
       // Create temporary booking data for payment metadata
@@ -83,17 +96,22 @@ export class BookingService {
       );
 
       if (!paymentResult.success) {
+        this.logger.error(`Payment failed for user ${userId}: ${paymentResult.error || 'Unknown error'}`);
         throw new BadRequestException(
           `Payment failed: ${paymentResult.error || 'Unknown error'}`,
         );
       }
     } catch (error) {
+      this.logger.error(`Payment processing failed for user ${userId}: ${error.message}`, error.stack);
       throw new BadRequestException(
         `Payment processing failed: ${error.message}`,
       );
     }
 
+    this.logger.log(`Payment successful: ${paymentResult.paymentId}`);
+
     // Only create booking AFTER successful payment
+    this.logger.log(`Creating booking record for user ${userId}`);
     const booking = await this.prisma.booking.create({
       data: {
         userId,
@@ -145,6 +163,7 @@ export class BookingService {
     };
 
     this.eventEmitter.emit('booking.confirmed', bookingConfirmedEvent);
+    this.logger.log(`Booking created successfully: ID ${booking.id}, User ${userId}, Resource ${resourceId}`);
 
     return {
       ...booking,
@@ -253,6 +272,7 @@ export class BookingService {
   }
 
   async findOne(id: number) {
+    this.logger.debug(`Fetching booking with ID: ${id}`);
     const booking = await this.prisma.booking.findUnique({
       where: { id },
       include: {
@@ -275,6 +295,7 @@ export class BookingService {
     });
 
     if (!booking) {
+      this.logger.warn(`Booking not found: ID ${id}`);
       throw new NotFoundException(`Booking with ID ${id} not found`);
     }
 
@@ -282,6 +303,7 @@ export class BookingService {
   }
 
   async updateStatus(id: number, status: 'PENDING' | 'CONFIRMED' | 'CANCELED') {
+    this.logger.log(`Updating booking ${id} status to: ${status}`);
     const booking = await this.prisma.booking.update({
       where: { id },
       data: { status },
@@ -312,6 +334,7 @@ export class BookingService {
         resourceId: booking.resourceId,
       };
       this.eventEmitter.emit('booking.confirmed', bookingConfirmedEvent);
+      this.logger.log(`Booking ${id} confirmed event emitted`);
     } else if (status === 'CANCELED') {
       const bookingCanceledEvent: BookingCanceledEvent = {
         bookingId: booking.id,
@@ -319,12 +342,14 @@ export class BookingService {
         resourceId: booking.resourceId,
       };
       this.eventEmitter.emit('booking.canceled', bookingCanceledEvent);
+      this.logger.log(`Booking ${id} canceled event emitted`);
     }
 
     return booking;
   }
 
   async cancel(id: number, reason?: string) {
+    this.logger.log(`Canceling booking ${id}${reason ? ` - Reason: ${reason}` : ''}`);
     return this.updateStatus(id, 'CANCELED');
   }
 

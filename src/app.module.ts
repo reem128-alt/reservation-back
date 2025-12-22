@@ -15,6 +15,7 @@ import { StatisticsModule } from './statistics/statistics.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { ChatModule } from './chat/chat.module';
+import { LoggerModule } from './shared/logger/logger.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { ChatModule } from './chat/chat.module';
       wildcard: true,
       delimiter: '.',
     }),
+    LoggerModule,
     AuthModule,
     ResourceTypeModule,
     ResourceModule,
