@@ -1,6 +1,6 @@
-import { Injectable, LoggerService, Scope } from '@nestjs/common';
+import { Injectable, LoggerService } from '@nestjs/common';
 
-@Injectable({ scope: Scope.TRANSIENT })
+@Injectable()
 export class CustomLoggerService implements LoggerService {
   private context?: string;
 
@@ -17,7 +17,9 @@ export class CustomLoggerService implements LoggerService {
   error(message: any, trace?: string, context?: string) {
     const timestamp = new Date().toISOString();
     const ctx = context || this.context || 'Application';
-    console.error(`[${timestamp}] [ERROR] [${ctx}] ${this.formatMessage(message)}`);
+    console.error(
+      `[${timestamp}] [ERROR] [${ctx}] ${this.formatMessage(message)}`,
+    );
     if (trace) {
       console.error(`[${timestamp}] [ERROR] [${ctx}] Stack Trace: ${trace}`);
     }
@@ -26,19 +28,25 @@ export class CustomLoggerService implements LoggerService {
   warn(message: any, context?: string) {
     const timestamp = new Date().toISOString();
     const ctx = context || this.context || 'Application';
-    console.warn(`[${timestamp}] [WARN] [${ctx}] ${this.formatMessage(message)}`);
+    console.warn(
+      `[${timestamp}] [WARN] [${ctx}] ${this.formatMessage(message)}`,
+    );
   }
 
   debug(message: any, context?: string) {
     const timestamp = new Date().toISOString();
     const ctx = context || this.context || 'Application';
-    console.debug(`[${timestamp}] [DEBUG] [${ctx}] ${this.formatMessage(message)}`);
+    console.debug(
+      `[${timestamp}] [DEBUG] [${ctx}] ${this.formatMessage(message)}`,
+    );
   }
 
   verbose(message: any, context?: string) {
     const timestamp = new Date().toISOString();
     const ctx = context || this.context || 'Application';
-    console.log(`[${timestamp}] [VERBOSE] [${ctx}] ${this.formatMessage(message)}`);
+    console.log(
+      `[${timestamp}] [VERBOSE] [${ctx}] ${this.formatMessage(message)}`,
+    );
   }
 
   private formatMessage(message: any): string {
