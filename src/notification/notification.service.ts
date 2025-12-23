@@ -4,27 +4,15 @@ import type {
   BookingConfirmedEvent,
   BookingCanceledEvent,
 } from '../shared/events/booking.events';
-import * as nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import { PrismaService } from '../auth/prisma.service';
 
 @Injectable()
 export class NotificationService {
-  private transporter: nodemailer.Transporter;
+  private resend: Resend;
 
   constructor(private prisma: PrismaService) {
-    this.transporter = nodemailer.createTransport({
-      host: process.env.EMAIL_HOST,
-      port: parseInt(process.env.EMAIL_PORT || '587'),
-      secure: false, // Use TLS
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-      tls: {
-        ciphers: 'SSLv3',
-        rejectUnauthorized: false,
-      },
-    });
+    this.resend = new Resend(process.env.RESEND_API_KEY);
   }
 
   async handleBookingCreated(event: BookingCreatedEvent) {
@@ -118,18 +106,23 @@ export class NotificationService {
   }
 
   private async sendEmail(to: string, subject: string, html: string) {
-    const fromEmail = process.env.EMAIL_USER;
-    const from = fromEmail ? `Reservation <${fromEmail}>` : 'Reservation';
+    const fromEmail = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
 
     try {
       console.log(`Attempting to send email to ${to} with subject: ${subject}`);
-      const info = await this.transporter.sendMail({
-        from,
-        to,
+      const { data, error } = await this.resend.emails.send({
+        from: fromEmail,
+        to: [to],
         subject,
         html,
       });
-      console.log('Email sent successfully:', info.messageId);
+      
+      if (error) {
+        console.error('Failed to send email:', error);
+        throw new Error(`Email sending failed: ${error.message}`);
+      }
+      
+      console.log('Email sent successfully:', data?.id);
     } catch (error) {
       console.error('Failed to send email:', error);
       throw new Error(`Email sending failed: ${error.message}`);
