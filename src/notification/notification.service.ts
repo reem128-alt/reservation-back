@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import type { 
-  BookingCreatedEvent, 
-  BookingConfirmedEvent, 
-  BookingCanceledEvent 
+import type {
+  BookingCreatedEvent,
+  BookingConfirmedEvent,
+  BookingCanceledEvent,
 } from '../shared/events/booking.events';
 import * as nodemailer from 'nodemailer';
 import { PrismaService } from '../auth/prisma.service';
@@ -77,7 +77,10 @@ export class NotificationService {
     };
   }
 
-  async updateNotificationSettings(userId: number, notificationsEnabled: boolean) {
+  async updateNotificationSettings(
+    userId: number,
+    notificationsEnabled: boolean,
+  ) {
     const updated = (await (this.prisma.user as any).update({
       where: { id: userId },
       data: { notificationsEnabled },
@@ -117,7 +120,7 @@ export class NotificationService {
   private async sendEmail(to: string, subject: string, html: string) {
     const fromEmail = process.env.EMAIL_USER;
     const from = fromEmail ? `Reservation <${fromEmail}>` : 'Reservation';
-    
+
     try {
       console.log(`Attempting to send email to ${to} with subject: ${subject}`);
       const info = await this.transporter.sendMail({
@@ -133,7 +136,11 @@ export class NotificationService {
     }
   }
 
-  async sendOtpEmail(to: string, code: string, purpose: 'REGISTER' | 'LOGIN' | 'RESET_PASSWORD') {
+  async sendOtpEmail(
+    to: string,
+    code: string,
+    purpose: 'REGISTER' | 'LOGIN' | 'RESET_PASSWORD',
+  ) {
     const subject =
       purpose === 'REGISTER'
         ? 'Verify your email'
@@ -149,7 +156,6 @@ export class NotificationService {
 
     await this.sendEmail(to, subject, html);
   }
-
 
   private wrapBookingEmail(title: string, contentHtml: string): string {
     return `
@@ -181,8 +187,12 @@ export class NotificationService {
     `;
   }
 
-  private bookingDetailsTable(rows: Array<{ label: string; value: string }>): string {
-    const safeRows = rows.filter((r) => r.value !== undefined && r.value !== null && r.value !== '');
+  private bookingDetailsTable(
+    rows: Array<{ label: string; value: string }>,
+  ): string {
+    const safeRows = rows.filter(
+      (r) => r.value !== undefined && r.value !== null && r.value !== '',
+    );
     const htmlRows = safeRows
       .map(
         (r) => `
@@ -200,7 +210,6 @@ export class NotificationService {
       </table>
     `;
   }
-
 
   private async getBookingEmailContext(bookingId: number) {
     const booking = await this.prisma.booking.findUnique({
@@ -236,13 +245,15 @@ export class NotificationService {
     }
 
     const userName = booking.user?.name ?? 'User';
-    const resourceTitle = booking.resource?.title ?? `Resource #${booking.resourceId}`;
+    const resourceTitle =
+      booking.resource?.title ?? `Resource #${booking.resourceId}`;
 
     let amount = booking.payment?.amount;
     let currency = booking.payment?.currency ?? 'usd';
     if (amount === undefined || amount === null) {
       const durationInHours =
-        (booking.endTime.getTime() - booking.startTime.getTime()) / (1000 * 60 * 60);
+        (booking.endTime.getTime() - booking.startTime.getTime()) /
+        (1000 * 60 * 60);
       amount = durationInHours * (booking.resource?.price ?? 0);
       currency = 'usd';
     }
@@ -289,7 +300,10 @@ export class NotificationService {
       { label: 'Booking ID', value: String(event.bookingId) },
       { label: 'Resource', value: ctx.resourceTitle },
       { label: 'Amount', value: ctx.amountText },
-      { label: 'Payment ID', value: event.paymentId ? String(event.paymentId) : '' },
+      {
+        label: 'Payment ID',
+        value: event.paymentId ? String(event.paymentId) : '',
+      },
     ]);
 
     const content = `
