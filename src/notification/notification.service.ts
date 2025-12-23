@@ -15,10 +15,14 @@ export class NotificationService {
     this.transporter = nodemailer.createTransport({
       host: process.env.EMAIL_HOST,
       port: parseInt(process.env.EMAIL_PORT || '587'),
-      secure: false,
+      secure: false, // Use TLS
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
+      },
+      tls: {
+        ciphers: 'SSLv3',
+        rejectUnauthorized: false,
       },
     });
   }
@@ -113,12 +117,20 @@ export class NotificationService {
   private async sendEmail(to: string, subject: string, html: string) {
     const fromEmail = process.env.EMAIL_USER;
     const from = fromEmail ? `Reservation <${fromEmail}>` : 'Reservation';
-    await this.transporter.sendMail({
-      from,
-      to,
-      subject,
-      html,
-    });
+    
+    try {
+      console.log(`Attempting to send email to ${to} with subject: ${subject}`);
+      const info = await this.transporter.sendMail({
+        from,
+        to,
+        subject,
+        html,
+      });
+      console.log('Email sent successfully:', info.messageId);
+    } catch (error) {
+      console.error('Failed to send email:', error);
+      throw new Error(`Email sending failed: ${error.message}`);
+    }
   }
 
   async sendOtpEmail(to: string, code: string, purpose: 'REGISTER' | 'LOGIN' | 'RESET_PASSWORD') {
