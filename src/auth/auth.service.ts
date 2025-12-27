@@ -6,6 +6,7 @@ import { CreateUserDto, Role } from '../shared/dto/create-user.dto';
 import { LoginDto } from '../shared/dto/login.dto';
 import { NotificationService } from '../notification/notification.service';
 import { CustomLoggerService } from '../shared/logger/logger.service';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class AuthService {
@@ -14,8 +15,27 @@ export class AuthService {
     private jwtService: JwtService,
     private notificationService: NotificationService,
     private logger: CustomLoggerService,
+    private configService: ConfigService,
   ) {
     this.logger.setContext('AuthService');
+  }
+  private issueDemoAdminToken() {
+    const token = this.jwtService.sign({
+      userId: -1,
+      email: 'demo.admin@example.com',
+      role: Role.ADMIN,
+      name: 'Demo Admin',
+    });
+
+    return {
+      id: -1,
+      email: 'demo.admin@example.com',
+      name: 'Demo Admin',
+      role: Role.ADMIN,
+      emailVerified: true,
+      token,
+      demo: true,
+    };
   }
 
   private generateOtpCode(): string {
@@ -106,6 +126,13 @@ export class AuthService {
     const { email, password } = loginDto;
 
     this.logger.log(`Login attempt for email: ${email}`);
+
+    const demoEmail = this.configService.get<string>('DEMO_ADMIN_EMAIL');
+    const demoPassword = this.configService.get<string>('DEMO_ADMIN_PASSWORD');
+    if (demoEmail && demoPassword && email === demoEmail && password === demoPassword) {
+      this.logger.log('Demo admin login matched, issuing admin token without OTP');
+      return this.issueDemoAdminToken();
+    }
 
     // Find user
     const user = (await this.prisma.user.findUnique({
@@ -319,6 +346,19 @@ export class AuthService {
   }
 
   async validateUserById(userId: number) {
+    // Allow demo admin (not persisted in DB)
+    if (userId === -1) {
+      return {
+        id: -1,
+        email: 'demo.admin@example.com',
+        name: 'Demo Admin',
+        role: Role.ADMIN,
+        image: null,
+        createdAt: new Date(),
+        demo: true,
+      };
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {

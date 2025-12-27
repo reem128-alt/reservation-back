@@ -11,6 +11,7 @@ import { NotificationModule } from '../notification/notification.module';
 
 @Module({
   imports: [
+    ConfigModule,
     NotificationModule,
     PassportModule,
     JwtModule.registerAsync({
