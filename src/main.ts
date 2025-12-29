@@ -31,26 +31,32 @@ async function bootstrap() {
     credentials: true,
   });
 
-  // Swagger configuration
-  const config = new DocumentBuilder()
-    .setTitle('Reservation System API')
-    .setDescription('API documentation for the Reservation System')
-    .setVersion('1.0')
-    .addTag('auth', 'Authentication endpoints')
-    .addTag('resources', 'Resource management')
-    .addTag('availability', 'Availability checking')
-    .addTag('bookings', 'Booking management')
-    .addTag('payments', 'Payment processing')
-    .addBearerAuth()
-    .build();
+  const isProduction = process.env.NODE_ENV === 'production';
 
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api', app, document);
+  if (!isProduction) {
+    // Swagger configuration (disabled in production to save memory)
+    const config = new DocumentBuilder()
+      .setTitle('Reservation System API')
+      .setDescription('API documentation for the Reservation System')
+      .setVersion('1.0')
+      .addTag('auth', 'Authentication endpoints')
+      .addTag('resources', 'Resource management')
+      .addTag('availability', 'Availability checking')
+      .addTag('bookings', 'Booking management')
+      .addTag('payments', 'Payment processing')
+      .addBearerAuth()
+      .build();
+
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api', app, document);
+  }
 
   const port = process.env.PORT ?? 5000;
   await app.listen(port);
   logger.log(`Application is running on: http://localhost:${port}`);
-  logger.log(`Swagger documentation: http://localhost:${port}/api`);
+  if (!isProduction) {
+    logger.log(`Swagger documentation: http://localhost:${port}/api`);
+  }
 }
 bootstrap().catch((error) => {
   console.error('Failed to start application:', error);
