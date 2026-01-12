@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from './prisma.service';
 import * as bcrypt from 'bcrypt';
@@ -91,7 +91,7 @@ export class AuthService {
 
     if (existingUser) {
       this.logger.warn(`Registration failed: User already exists - ${email}`);
-      throw new UnauthorizedException('User already exists');
+      throw new ConflictException('User already exists');
     }
 
     // Hash password
@@ -291,6 +291,69 @@ export class AuthService {
 
     return {
       message: 'If an account with that email exists, a password reset code was sent.',
+    };
+  }
+
+  async resetPassword(email: string, code: string, newPassword: string) {
+    this.logger.log(`Password reset attempt for email: ${email}`);
+
+    const user = (await this.prisma.user.findUnique({
+      where: { email },
+    })) as any;
+
+    if (!user) {
+      this.logger.warn(`Password reset failed: User not found - ${email}`);
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const otp = await this.prisma.otpCode.findUnique({
+      where: {
+        userId_purpose: {
+          userId: user.id,
+          purpose: 'RESET_PASSWORD',
+        },
+      },
+    });
+
+    if (!otp) {
+      this.logger.warn(`Password reset failed: No OTP found - ${email}`);
+      throw new UnauthorizedException('Invalid or expired reset code');
+    }
+
+    if (otp.expiresAt.getTime() < Date.now()) {
+      this.logger.warn(`Password reset failed: OTP expired - ${email}`);
+      throw new UnauthorizedException('Reset code expired');
+    }
+
+    if (otp.attempts >= 5) {
+      this.logger.warn(`Password reset failed: Too many attempts - ${email}`);
+      throw new UnauthorizedException('Too many attempts');
+    }
+
+    const ok = await bcrypt.compare(code, otp.codeHash);
+    if (!ok) {
+      await this.prisma.otpCode.update({
+        where: { id: otp.id },
+        data: { attempts: otp.attempts + 1 },
+      });
+      this.logger.warn(`Password reset failed: Invalid code - ${email} (Attempt ${otp.attempts + 1})`);
+      throw new UnauthorizedException('Invalid reset code');
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { password: hashedPassword },
+    });
+
+    await this.prisma.otpCode.delete({
+      where: { id: otp.id },
+    });
+
+    this.logger.log(`Password reset successfully for ${email}`);
+
+    return {
+      message: 'Password reset successfully',
     };
   }
 

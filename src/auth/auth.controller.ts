@@ -5,6 +5,7 @@ import { LoginDto } from '../shared/dto/login.dto';
 import { VerifyOtpDto } from '../shared/dto/verify-otp.dto';
 import { ResendOtpDto } from '../shared/dto/resend-otp.dto';
 import { ForgotPasswordDto } from '../shared/dto/forgot-password.dto';
+import { ResetPasswordDto } from '../shared/dto/reset-password.dto';
 import { ChangePasswordDto } from '../shared/dto/change-password.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
@@ -51,6 +52,14 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Reset code sent if email exists' })
   async forgotPassword(@Body() dto: ForgotPasswordDto) {
     return this.authService.forgotPassword(dto.email);
+  }
+
+  @Post('reset-password')
+  @ApiOperation({ summary: 'Reset password with OTP code' })
+  @ApiResponse({ status: 200, description: 'Password reset successfully' })
+  @ApiResponse({ status: 401, description: 'Invalid or expired reset code' })
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto.email, dto.code, dto.newPassword);
   }
 
   @Post('change-password')
