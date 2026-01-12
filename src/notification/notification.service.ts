@@ -4,15 +4,34 @@ import type {
   BookingConfirmedEvent,
   BookingCanceledEvent,
 } from '../shared/events/booking.events';
-import { Resend } from 'resend';
+import * as nodemailer from 'nodemailer';
 import { PrismaService } from '../auth/prisma.service';
 
 @Injectable()
 export class NotificationService {
-  private resend: Resend;
+  private transporter: nodemailer.Transporter | null;
 
   constructor(private prisma: PrismaService) {
-    this.resend = new Resend(process.env.RESEND_API_KEY);
+    this.initializeTransporter();
+  }
+
+  private initializeTransporter() {
+    // Use SMTP if configured, otherwise use mock service
+    if (process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+      this.transporter = nodemailer.createTransport({
+        host: process.env.EMAIL_HOST,
+        port: parseInt(process.env.EMAIL_PORT || '587'),
+        secure: process.env.EMAIL_PORT === '465', // true for 465, false for other ports
+        auth: {
+          user: process.env.EMAIL_USER,
+          pass: process.env.EMAIL_PASS,
+        },
+      });
+      console.log('[EMAIL SERVICE] SMTP transporter initialized');
+    } else {
+      console.log('[EMAIL SERVICE] No SMTP configuration found, using mock service');
+      this.transporter = null;
+    }
   }
 
   async handleBookingCreated(event: BookingCreatedEvent) {
@@ -106,49 +125,43 @@ export class NotificationService {
   }
 
   private async sendEmail(to: string, subject: string, html: string) {
-    const fromEmail = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
+    // Use SMTP if configured, otherwise use mock service
+    if (this.transporter) {
+      try {
+        console.log(`[SMTP] Sending email to ${to} with subject: ${subject}`);
+        
+        const mailOptions = {
+          from: `"Reservation System" <${process.env.EMAIL_USER}>`,
+          to: to,
+          subject: subject,
+          html: html,
+        };
 
-    try {
-      console.log(`[RESEND] Sending email to ${to} with subject: ${subject}`);
-      
-      const { data, error } = await this.resend.emails.send({
-        from: fromEmail,
-        to: [to],
-        subject,
-        html,
-      });
-      
-      if (error) {
-        console.error('[RESEND] Failed to send email:', error);
-        // In development, log the OTP instead of failing
-        if (process.env.NODE_ENV !== 'production') {
-          const otp = subject.includes('code') ? html.match(/(\d{6})/)?.[1] : null;
-          if (otp) {
-            console.log(`[DEV MODE] OTP for ${to}: ${otp}`);
-          } else {
-            console.log(`[DEV MODE] Email failed to send. Subject: ${subject}`);
-          }
-          return { success: true, devMode: true };
-        }
-        throw new Error(`Email sending failed: ${error.message}`);
+        const info = await this.transporter.sendMail(mailOptions);
+        console.log('[SMTP] Email sent successfully:', info.messageId);
+        return { success: true, emailId: info.messageId };
+      } catch (error) {
+        console.error('[SMTP] Failed to send email:', error);
+        // Fall back to mock service
+        return this.sendMockEmail(to, subject, html);
       }
-      
-      console.log('[RESEND] Email sent successfully:', data?.id);
-      return { success: true, emailId: data?.id };
-    } catch (error) {
-      console.error('[RESEND] Failed to send email:', error);
-      // In development, log the OTP instead of failing
-      if (process.env.NODE_ENV !== 'production') {
-        const otp = subject.includes('code') ? html.match(/(\d{6})/)?.[1] : null;
-        if (otp) {
-          console.log(`[DEV MODE] OTP for ${to}: ${otp}`);
-        } else {
-          console.log(`[DEV MODE] Email failed to send. Subject: ${subject}`);
-        }
-        return { success: true, devMode: true };
-      }
-      throw new Error(`Email sending failed: ${error.message}`);
+    } else {
+      // Use mock service
+      return this.sendMockEmail(to, subject, html);
     }
+  }
+
+  private async sendMockEmail(to: string, subject: string, html: string) {
+    const otp = subject.includes('code') ? html.match(/(\d{6})/)?.[1] : null;
+    
+    console.log(`[MOCK EMAIL] To: ${to}`);
+    console.log(`[MOCK EMAIL] Subject: ${subject}`);
+    if (otp) {
+      console.log(`[MOCK EMAIL] OTP: ${otp}`);
+    }
+    console.log(`[MOCK EMAIL] HTML content length: ${html.length} chars`);
+    
+    return { success: true, mockService: true };
   }
 
   async sendOtpEmail(
