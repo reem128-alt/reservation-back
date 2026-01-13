@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../auth/prisma.service';
 import { CreateUserDto, Role } from '../shared/dto/create-user.dto';
 import { UpdateUserDto } from '../shared/dto/update-user.dto';
-import * as bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs';
 import { buildPaginationMeta, type PaginationParams } from '../shared/pagination';
 
 @Injectable()
