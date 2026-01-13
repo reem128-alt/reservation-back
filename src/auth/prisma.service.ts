@@ -11,10 +11,16 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     const connectionString = process.env.DATABASE_URL;
     const pool = new Pool({ 
       connectionString,
-      ssl: false // Disable SSL for local PostgreSQL
+      ssl: connectionString?.includes('render.com') ? { rejectUnauthorized: false } : false,
+      max: 20, // Maximum pool size
+      idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
+      connectionTimeoutMillis: 10000, // Return error after 10 seconds if connection not established
     });
     const adapter = new PrismaPg(pool);
-    this.prisma = new PrismaClient({ adapter });
+    this.prisma = new PrismaClient({ 
+      adapter,
+      log: ['error', 'warn'],
+    });
   }
 
   get user() {

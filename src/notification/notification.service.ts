@@ -4,33 +4,26 @@ import type {
   BookingConfirmedEvent,
   BookingCanceledEvent,
 } from '../shared/events/booking.events';
-import * as nodemailer from 'nodemailer';
+import { MailerSend, EmailParams, Sender, Recipient } from 'mailersend';
 import { PrismaService } from '../auth/prisma.service';
 
 @Injectable()
 export class NotificationService {
-  private transporter: nodemailer.Transporter | null;
+  private mailerSend: MailerSend | null;
 
   constructor(private prisma: PrismaService) {
-    this.initializeTransporter();
+    this.initializeMailerSend();
   }
 
-  private initializeTransporter() {
-    // Use SMTP if configured, otherwise use mock service
-    if (process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-      this.transporter = nodemailer.createTransport({
-        host: process.env.EMAIL_HOST,
-        port: parseInt(process.env.EMAIL_PORT || '587'),
-        secure: process.env.EMAIL_PORT === '465', // true for 465, false for other ports
-        auth: {
-          user: process.env.EMAIL_USER,
-          pass: process.env.EMAIL_PASS,
-        },
+  private initializeMailerSend() {
+    if (process.env.MAILERSEND_API_KEY) {
+      this.mailerSend = new MailerSend({
+        apiKey: process.env.MAILERSEND_API_KEY,
       });
-      console.log('[EMAIL SERVICE] SMTP transporter initialized');
+      console.log('[EMAIL SERVICE] MailerSend initialized');
     } else {
-      console.log('[EMAIL SERVICE] No SMTP configuration found, using mock service');
-      this.transporter = null;
+      console.log('[EMAIL SERVICE] No MailerSend API key found, using mock service');
+      this.mailerSend = null;
     }
   }
 
@@ -125,23 +118,29 @@ export class NotificationService {
   }
 
   private async sendEmail(to: string, subject: string, html: string) {
-    // Use SMTP if configured, otherwise use mock service
-    if (this.transporter) {
+    // Use MailerSend if configured, otherwise use mock service
+    if (this.mailerSend) {
       try {
-        console.log(`[SMTP] Sending email to ${to} with subject: ${subject}`);
+        console.log(`[MAILERSEND] Sending email to ${to} with subject: ${subject}`);
         
-        const mailOptions = {
-          from: `"Reservation System" <${process.env.EMAIL_USER}>`,
-          to: to,
-          subject: subject,
-          html: html,
-        };
+        const sentFrom = new Sender(
+          process.env.MAILERSEND_FROM_EMAIL || 'noreply@trial-domain.mlsender.net',
+          'Reservation System'
+        );
+        
+        const recipients = [new Recipient(to)];
+        
+        const emailParams = new EmailParams()
+          .setFrom(sentFrom)
+          .setTo(recipients)
+          .setSubject(subject)
+          .setHtml(html);
 
-        const info = await this.transporter.sendMail(mailOptions);
-        console.log('[SMTP] Email sent successfully:', info.messageId);
-        return { success: true, emailId: info.messageId };
+        const response = await this.mailerSend.email.send(emailParams);
+        console.log('[MAILERSEND] Email sent successfully');
+        return { success: true, emailId: response.body.message_id };
       } catch (error) {
-        console.error('[SMTP] Failed to send email:', error);
+        console.error('[MAILERSEND] Failed to send email:', error);
         // Fall back to mock service
         return this.sendMockEmail(to, subject, html);
       }
@@ -171,15 +170,92 @@ export class NotificationService {
   ) {
     const subject =
       purpose === 'REGISTER'
-        ? 'Verify your email'
+        ? 'Verify Your Email - Reservation Platform'
         : purpose === 'LOGIN'
-          ? 'Login verification code'
-          : 'Password reset code';
+          ? 'Login Verification Code - Reservation Platform'
+          : 'Password Reset Code - Reservation Platform';
+    
     const html = `
-      <h2>${subject}</h2>
-      <p>Your verification code is:</p>
-      <p style="font-size: 24px; font-weight: 700; letter-spacing: 4px;">${code}</p>
-      <p>This code will expire soon. If you did not request this, you can ignore this email.</p>
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      </head>
+      <body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; background-color: #f6f8fb;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #f6f8fb; padding: 40px 20px;">
+          <tr>
+            <td align="center">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width: 600px; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                <!-- Header -->
+                <tr>
+                  <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px 20px; text-align: center;">
+                    <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 700; letter-spacing: -0.5px;">
+                      🏢 Reservation Platform
+                    </h1>
+                    <p style="margin: 8px 0 0 0; color: #ffffff; font-size: 14px; opacity: 0.9;">
+                      Your trusted booking solution
+                    </p>
+                  </td>
+                </tr>
+                
+                <!-- Content -->
+                <tr>
+                  <td style="padding: 40px 30px;">
+                    <h2 style="margin: 0 0 20px 0; color: #1e293b; font-size: 24px; font-weight: 600;">
+                      ${subject.split(' - ')[0]}
+                    </h2>
+                    
+                    <p style="margin: 0 0 30px 0; color: #475569; font-size: 16px; line-height: 1.6;">
+                      ${purpose === 'REGISTER' ? 'Welcome! Please verify your email address to complete your registration.' : purpose === 'LOGIN' ? 'Use the code below to securely log in to your account.' : 'Use the code below to reset your password.'}
+                    </p>
+                    
+                    <!-- OTP Code Box -->
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin: 0 0 30px 0;">
+                      <tr>
+                        <td style="background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%); border: 2px dashed #667eea; border-radius: 12px; padding: 30px; text-align: center;">
+                          <p style="margin: 0 0 10px 0; color: #64748b; font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;">
+                            Your Verification Code
+                          </p>
+                          <p style="margin: 0; color: #667eea; font-size: 42px; font-weight: 700; letter-spacing: 8px; font-family: 'Courier New', monospace;">
+                            ${code}
+                          </p>
+                        </td>
+                      </tr>
+                    </table>
+                    
+                    <p style="margin: 0 0 20px 0; color: #64748b; font-size: 14px; line-height: 1.6;">
+                      ⏱️ This code will expire in <strong>10 minutes</strong> for your security.
+                    </p>
+                    
+                    <div style="background-color: #fef3c7; border-left: 4px solid #f59e0b; padding: 16px; border-radius: 8px; margin: 0 0 20px 0;">
+                      <p style="margin: 0; color: #92400e; font-size: 14px; line-height: 1.6;">
+                        <strong>⚠️ Security Notice:</strong> If you didn't request this code, please ignore this email or contact our support team immediately.
+                      </p>
+                    </div>
+                  </td>
+                </tr>
+                
+                <!-- Footer -->
+                <tr>
+                  <td style="background-color: #f8fafc; padding: 30px; text-align: center; border-top: 1px solid #e2e8f0;">
+                    <p style="margin: 0 0 10px 0; color: #64748b; font-size: 14px;">
+                      <strong>Reservation Platform</strong>
+                    </p>
+                    <p style="margin: 0 0 15px 0; color: #94a3b8; font-size: 12px;">
+                      Making reservations simple and secure
+                    </p>
+                    <p style="margin: 0; color: #cbd5e1; font-size: 11px;">
+                      © ${new Date().getFullYear()} Reservation Platform. All rights reserved.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
     `;
 
     // Log the OTP code for development
