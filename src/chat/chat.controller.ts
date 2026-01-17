@@ -9,6 +9,7 @@ import {
   Request,
   Patch,
   ParseIntPipe,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { ChatService } from './chat.service';
@@ -94,5 +95,16 @@ export class ChatController {
   async getUnreadCount(@Request() req) {
     const isAdmin = req.user.role === 'ADMIN';
     return this.chatService.getUnreadCount(req.user.id, isAdmin);
+  }
+
+  @Get('unread-details')
+  @ApiOperation({ summary: 'Get unread count per conversation (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Returns detailed unread information' })
+  async getUnreadDetails(@Request() req) {
+    const isAdmin = req.user.role === 'ADMIN';
+    if (!isAdmin) {
+      throw new UnauthorizedException('Admin access required');
+    }
+    return this.chatService.getUnreadDetails(req.user.id);
   }
 }

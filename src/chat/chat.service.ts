@@ -40,6 +40,20 @@ export class ChatService {
           conversationId = newConversation.id;
         }
       } else {
+        // User starting conversation - assign last active admin
+        const lastActiveAdmin = await this.prisma.user.findFirst({
+          where: {
+            role: 'ADMIN',
+          },
+          orderBy: {
+            id: 'desc',  // Most recently created admin (as proxy for activity)
+          },
+        });
+
+        if (!lastActiveAdmin) {
+          throw new BadRequestException('No admin available for support');
+        }
+
         const existingConversation = await this.prisma.chatConversation.findFirst({
           where: {
             userId: senderId,
@@ -303,21 +317,100 @@ export class ChatService {
   }
 
   async getUnreadCount(userId: number, isAdmin: boolean) {
-    const where: any = {
-      messages: {
-        some: {
-          senderId: { not: userId },
-          isRead: false,
-        },
-      },
-    };
+    let where: any = {};
 
     if (!isAdmin) {
-      where.userId = userId;
+      // Regular user: count unread messages in their conversations
+      where = {
+        conversation: {
+          userId: userId,
+        },
+        senderId: { not: userId },
+        isRead: false,
+      };
+    } else {
+      // Admin: count unread messages in all admin conversations
+      where = {
+        conversation: {
+          userId: userId,
+        },
+        senderId: { not: userId },
+        isRead: false,
+      };
     }
 
-    const count = await this.prisma.chatConversation.count({ where });
+    const count = await this.prisma.chatMessage.count({ where });
 
-    return { unreadConversations: count };
+    return { unreadMessages: count };
+  }
+
+  async getUnreadDetails(adminId: number) {
+    console.log(`[DEBUG] Getting unread details for admin ID: ${adminId}`);
+    
+    // Get ALL conversations where admin is a participant (either as userId or in messages)
+    const conversations = await this.prisma.chatConversation.findMany({
+      where: {
+        OR: [
+          { userId: adminId },  // Admin is the conversation owner
+          {
+            messages: {
+              some: {
+                senderId: adminId,  // Admin sent messages in this conversation
+              },
+            },
+          },
+        ],
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        messages: {
+          where: {
+            senderId: { not: adminId },
+            isRead: false,
+          },
+          select: {
+            id: true,
+            content: true,
+            createdAt: true,
+            senderId: true,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+        },
+      },
+      orderBy: {
+        updatedAt: 'desc',
+      },
+    });
+
+    console.log(`[DEBUG] Found ${conversations.length} conversations for admin`);
+    
+    // Format the response
+    const unreadDetails = conversations.map(conv => {
+      console.log(`[DEBUG] Conversation ${conv.id} with user ${conv.user.name}: ${conv.messages.length} unread messages`);
+      return {
+        conversationId: conv.id,
+        user: conv.user,
+        unreadCount: conv.messages.length,
+        lastUnreadMessage: conv.messages[0] || null,
+        lastActivity: conv.updatedAt,
+      };
+    });
+
+    // Count conversations with unread messages
+    const conversationsWithUnread = unreadDetails.filter(conv => conv.unreadCount > 0);
+
+    return {
+      totalUnreadConversations: conversationsWithUnread.length,
+      totalConversations: conversations.length,
+      conversations: unreadDetails,
+    };
   }
 }
