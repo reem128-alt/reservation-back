@@ -7,16 +7,20 @@ import { LoggingInterceptor } from './shared/interceptors/logging.interceptor';
 import { AllExceptionsFilter } from './shared/filters/http-exception.filter';
 
 async function bootstrap() {
+  const isProduction = process.env.NODE_ENV === 'production';
+  
   const app = await NestFactory.create(AppModule, {
-    bufferLogs: true,
+    bufferLogs: !isProduction, // Disable buffering in production to save memory
+    logger: isProduction ? ['error', 'warn'] : ['log', 'error', 'warn', 'debug'], // Minimal logging in production
   });
 
-  const logger = app.get(CustomLoggerService);
-  logger.setContext('Bootstrap');
-  app.useLogger(logger);
-
-  app.useGlobalInterceptors(new LoggingInterceptor(logger));
-  app.useGlobalFilters(new AllExceptionsFilter(logger));
+  if (!isProduction) {
+    const logger = app.get(CustomLoggerService);
+    logger.setContext('Bootstrap');
+    app.useLogger(logger);
+    app.useGlobalInterceptors(new LoggingInterceptor(logger));
+    app.useGlobalFilters(new AllExceptionsFilter(logger));
+  }
 
   // Enable validation
   app.useGlobalPipes(new ValidationPipe({
@@ -30,8 +34,6 @@ async function bootstrap() {
     origin: '*',
     credentials: true,
   });
-
-  const isProduction = process.env.NODE_ENV === 'production';
 
   if (!isProduction) {
     // Swagger configuration (disabled in production to save memory)
@@ -53,9 +55,13 @@ async function bootstrap() {
 
   const port = process.env.PORT ?? 5000;
   await app.listen(port);
-  logger.log(`Application is running on: http://localhost:${port}`);
+  
   if (!isProduction) {
+    const logger = app.get(CustomLoggerService);
+    logger.log(`Application is running on: http://localhost:${port}`);
     logger.log(`Swagger documentation: http://localhost:${port}/api`);
+  } else {
+    console.log(`Application is running on: http://localhost:${port}`);
   }
 }
 bootstrap().catch((error) => {

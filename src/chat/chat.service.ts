@@ -345,8 +345,6 @@ export class ChatService {
   }
 
   async getUnreadDetails(adminId: number) {
-    console.log(`[DEBUG] Getting unread details for admin ID: ${adminId}`);
-    
     // Get ALL conversations where admin is a participant (either as userId or in messages)
     const conversations = await this.prisma.chatConversation.findMany({
       where: {
@@ -389,20 +387,15 @@ export class ChatService {
         updatedAt: 'desc',
       },
     });
-
-    console.log(`[DEBUG] Found ${conversations.length} conversations for admin`);
     
     // Format the response
-    const unreadDetails = conversations.map(conv => {
-      console.log(`[DEBUG] Conversation ${conv.id} with user ${conv.user.name}: ${conv.messages.length} unread messages`);
-      return {
-        conversationId: conv.id,
-        user: conv.user,
-        unreadCount: conv.messages.length,
-        lastUnreadMessage: conv.messages[0] || null,
-        lastActivity: conv.updatedAt,
-      };
-    });
+    const unreadDetails = conversations.map(conv => ({
+      conversationId: conv.id,
+      user: conv.user,
+      unreadCount: conv.messages.length,
+      lastUnreadMessage: conv.messages[0] || null,
+      lastActivity: conv.updatedAt,
+    }));
 
     // Count conversations with unread messages
     const conversationsWithUnread = unreadDetails.filter(conv => conv.unreadCount > 0);
