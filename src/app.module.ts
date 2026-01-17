@@ -16,6 +16,7 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { ChatModule } from './chat/chat.module';
 import { LoggerModule } from './shared/logger/logger.module';
+import { HealthController } from './health/health.controller';
 
 @Module({
   imports: [
@@ -40,7 +41,7 @@ import { LoggerModule } from './shared/logger/logger.module';
     CloudinaryModule,
     ChatModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, HealthController],
   providers: [AppService],
 })
 export class AppModule {}

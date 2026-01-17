@@ -12,14 +12,14 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     const pool = new Pool({ 
       connectionString,
       ssl: connectionString?.includes('render.com') ? { rejectUnauthorized: false } : false,
-      max: 5, // Reduced pool size for memory efficiency
-      idleTimeoutMillis: 10000, // Close idle clients after 10 seconds
-      connectionTimeoutMillis: 5000, // Return error after 5 seconds if connection not established
+      max: 2, // Very aggressive reduction for Render
+      idleTimeoutMillis: 5000, // Close idle clients after 5 seconds
+      connectionTimeoutMillis: 3000, // Return error after 3 seconds if connection not established
     });
     const adapter = new PrismaPg(pool);
     this.prisma = new PrismaClient({ 
       adapter,
-      log: ['error', 'warn'],
+      log: process.env.NODE_ENV === 'production' ? [] : ['error', 'warn'],
     });
   }
 
