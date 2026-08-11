@@ -1,10 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ResourceService } from './resource.service';
 import { ResourceController } from './resource.controller';
-import { PrismaService } from '../auth/prisma.service';
-
 @Module({
-  providers: [ResourceService, PrismaService],
+  providers: [ResourceService],
   controllers: [ResourceController],
   exports: [ResourceService],
 })

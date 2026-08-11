@@ -4,70 +4,32 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 
 @Injectable()
-export class PrismaService implements OnModuleInit, OnModuleDestroy {
-  private prisma: PrismaClient;
+export class PrismaService
+  extends PrismaClient
+  implements OnModuleInit, OnModuleDestroy {
 
   constructor() {
     const connectionString = process.env.DATABASE_URL;
-    const pool = new Pool({ 
+    const pool = new Pool({
       connectionString,
       ssl: connectionString?.includes('render.com') ? { rejectUnauthorized: false } : false,
-      max: 2, // Very aggressive reduction for Render
-      idleTimeoutMillis: 5000, // Close idle clients after 5 seconds
-      connectionTimeoutMillis: 3000, // Return error after 3 seconds if connection not established
     });
     const adapter = new PrismaPg(pool);
-    this.prisma = new PrismaClient({ 
+
+    super({
       adapter,
-      log: process.env.NODE_ENV === 'production' ? [] : ['error', 'warn'],
+      log: process.env.NODE_ENV === 'production'
+        ? ['error']
+        : ['error', 'warn'],
     });
-  }
-
-  get user() {
-    return this.prisma.user;
-  }
-
-  get otpCode() {
-    return (this.prisma as any).otpCode;
-  }
-
-  get resource() {
-    return this.prisma.resource;
-  }
-
-  get resourceType() {
-    return this.prisma.resourceType;
-  }
-
-  get resourceSchedule() {
-    return this.prisma.resourceSchedule;
-  }
-
-  get booking() {
-    return this.prisma.booking;
-  }
-
-  get payment() {
-    return this.prisma.payment;
-  }
-
-  get paymentMethod() {
-    return (this.prisma as any).paymentMethod;
-  }
-
-  get chatConversation() {
-    return this.prisma.chatConversation;
-  }
-
-  get chatMessage() {
-    return this.prisma.chatMessage;
   }
 
   async onModuleInit() {
-    await this.prisma.$connect();
+    await this.$connect();
+    console.log('Database connected successfully');
   }
 
   async onModuleDestroy() {
-    await this.prisma.$disconnect();
+    await this.$disconnect();
   }
 }

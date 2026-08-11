@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
@@ -17,6 +19,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { ChatModule } from './chat/chat.module';
 import { LoggerModule } from './shared/logger/logger.module';
 import { HealthController } from './health/health.controller';
+import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
   imports: [
@@ -27,6 +30,11 @@ import { HealthController } from './health/health.controller';
       wildcard: true,
       delimiter: '.',
     }),
+    ThrottlerModule.forRoot([{
+      ttl: 60000, // Time window: 60 seconds (1 minute)
+      limit: 10, // Max 10 requests per minute per IP
+    }]),
+    PrismaModule,
     LoggerModule,
     AuthModule,
     ResourceTypeModule,
@@ -42,6 +50,12 @@ import { HealthController } from './health/health.controller';
     ChatModule,
   ],
   controllers: [AppController, HealthController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard, // Apply throttler globally
+    },
+  ],
 })
 export class AppModule {}

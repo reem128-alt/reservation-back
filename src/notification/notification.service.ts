@@ -118,50 +118,37 @@ export class NotificationService {
   }
 
   private async sendEmail(to: string, subject: string, html: string) {
-    // Use MailerSend if configured, otherwise use mock service
-    if (this.mailerSend) {
-      try {
-        console.log(`[MAILERSEND] Sending email to ${to} with subject: ${subject}`);
-        
-        const sentFrom = new Sender(
-          process.env.MAILERSEND_FROM_EMAIL || 'noreply@trial-domain.mlsender.net',
-          'Reservation System'
-        );
-        
-        const recipients = [new Recipient(to)];
-        
-        const emailParams = new EmailParams()
-          .setFrom(sentFrom)
-          .setTo(recipients)
-          .setSubject(subject)
-          .setHtml(html);
+    if (!this.mailerSend) {
+      const error = 'Email service not configured. Please set MAILERSEND_API_KEY and MAILERSEND_FROM_EMAIL in environment variables.';
+      console.error(`[EMAIL ERROR] ${error}`);
+      throw new Error(error);
+    }
 
-        const response = await this.mailerSend.email.send(emailParams);
-        console.log('[MAILERSEND] Email sent successfully');
-        return { success: true, emailId: response.body.message_id };
-      } catch (error) {
-        console.error('[MAILERSEND] Failed to send email:', error);
-        // Fall back to mock service
-        return this.sendMockEmail(to, subject, html);
-      }
-    } else {
-      // Use mock service
-      return this.sendMockEmail(to, subject, html);
+    try {
+      console.log(`[MAILERSEND] Sending email to ${to} with subject: ${subject}`);
+      
+      const sentFrom = new Sender(
+        process.env.MAILERSEND_FROM_EMAIL || 'noreply@trial-domain.mlsender.net',
+        process.env.EMAIL_FROM_NAME || 'Reservation System'
+      );
+      
+      const recipients = [new Recipient(to)];
+      
+      const emailParams = new EmailParams()
+        .setFrom(sentFrom)
+        .setTo(recipients)
+        .setSubject(subject)
+        .setHtml(html);
+
+      const response = await this.mailerSend.email.send(emailParams);
+      console.log('[MAILERSEND] Email sent successfully');
+      return { success: true, emailId: response.body.message_id };
+    } catch (error) {
+      console.error('[MAILERSEND] Failed to send email:', error);
+      throw new Error(`Failed to send email: ${error.message || 'Unknown error'}`);
     }
   }
 
-  private async sendMockEmail(to: string, subject: string, html: string) {
-    const otp = subject.includes('code') ? html.match(/(\d{6})/)?.[1] : null;
-    
-    console.log(`[MOCK EMAIL] To: ${to}`);
-    console.log(`[MOCK EMAIL] Subject: ${subject}`);
-    if (otp) {
-      console.log(`[MOCK EMAIL] OTP: ${otp}`);
-    }
-    console.log(`[MOCK EMAIL] HTML content length: ${html.length} chars`);
-    
-    return { success: true, mockService: true };
-  }
 
   async sendOtpEmail(
     to: string,
@@ -258,12 +245,17 @@ export class NotificationService {
       </html>
     `;
 
-    // Log the OTP code for development
     if (process.env.NODE_ENV !== 'production') {
       console.log(`[DEV MODE] OTP for ${to}: ${code} (purpose: ${purpose})`);
     }
 
-    await this.sendEmail(to, subject, html);
+    try {
+      await this.sendEmail(to, subject, html);
+      console.log(`[OTP EMAIL] Successfully sent OTP to ${to}`);
+    } catch (error) {
+      console.error(`[OTP EMAIL ERROR] Failed to send OTP to ${to}:`, error.message);
+      throw error;
+    }
   }
 
   private wrapBookingEmail(title: string, contentHtml: string): string {

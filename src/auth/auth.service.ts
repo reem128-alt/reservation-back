@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from './prisma.service';
 import * as bcrypt from 'bcryptjs';
@@ -76,7 +76,14 @@ export class AuthService {
       },
     });
 
-    await this.notificationService.sendOtpEmail(email, code, purpose);
+    try {
+      await this.notificationService.sendOtpEmail(email, code, purpose);
+    } catch (error) {
+      this.logger.error(`Failed to send OTP email to ${email}:`, error.message);
+      throw new InternalServerErrorException(
+        'Failed to send verification email. Please check your email configuration or try again later.',
+      );
+    }
   }
 
   async register(createUserDto: CreateUserDto) {
@@ -84,32 +91,52 @@ export class AuthService {
 
     this.logger.log(`Registration attempt for email: ${email}`);
 
-    // Check if user exists
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email },
-    });
+    let existingUser: any;
+    try {
+      existingUser = await this.prisma.user.findUnique({
+        where: { email },
+      });
+    } catch (error) {
+      this.logger.error(`Database error checking existing user for ${email}:`, error.message);
+      throw new InternalServerErrorException(
+        'Unable to connect to the database. Please try again later.',
+      );
+    }
 
     if (existingUser) {
       this.logger.warn(`Registration failed: User already exists - ${email}`);
       throw new ConflictException('User already exists');
     }
 
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create user
-    const user = await this.prisma.user.create({
-      data: {
-        email,
-        password: hashedPassword,
-        name,
-        role,
-      },
-    });
+    let user: any;
+    try {
+      user = await this.prisma.user.create({
+        data: {
+          email,
+          password: hashedPassword,
+          name,
+          role,
+        },
+      });
+    } catch (error) {
+      this.logger.error(`Database error creating user for ${email}:`, error.message);
+      throw new InternalServerErrorException(
+        'Unable to create user account. Please try again later.',
+      );
+    }
 
     this.logger.log(`User registered successfully: ${user.email} (ID: ${user.id})`);
-    await this.issueOtp(user.id, user.email, 'REGISTER');
-    this.logger.log(`OTP sent for registration: ${user.email}`);
+    
+    try {
+      await this.issueOtp(user.id, user.email, 'REGISTER');
+      this.logger.log(`OTP sent for registration: ${user.email}`);
+    } catch (error) {
+      await this.prisma.user.delete({ where: { id: user.id } });
+      this.logger.error(`Failed to send OTP, user deleted: ${user.email}`);
+      throw error;
+    }
 
     return {
       message: 'OTP code sent to your email',
@@ -134,22 +161,78 @@ export class AuthService {
       return this.issueDemoAdminToken();
     }
 
-    // Find user
-    const user = (await this.prisma.user.findUnique({
-      where: { email },
-    })) as any;
+    let user: any;
+    try {
+      user = (await this.prisma.user.findUnique({
+        where: { email },
+      })) as any;
+    } catch (error) {
+      this.logger.error(`Database error during login for ${email}:`, error.message);
+      throw new InternalServerErrorException(
+        'Unable to connect to the database. Please try again later.',
+      );
+    }
 
     if (!user) {
       this.logger.warn(`Login failed: User not found - ${email}`);
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    // Check if account is locked
+    if (user.lockedUntil && new Date(user.lockedUntil) > new Date()) {
+      const remainingMinutes = Math.ceil((new Date(user.lockedUntil).getTime() - Date.now()) / 60000);
+      this.logger.warn(`Login failed: Account locked - ${email} (${remainingMinutes} minutes remaining)`);
+      throw new UnauthorizedException(`Account is locked due to too many failed login attempts. Please try again in ${remainingMinutes} minute(s).`);
+    }
+
     // Check password
     const isPasswordValid = await bcrypt.compare(password, user.password);
 
     if (!isPasswordValid) {
-      this.logger.warn(`Login failed: Invalid password - ${email}`);
-      throw new UnauthorizedException('Invalid credentials');
+      // Increment failed login attempts
+      const newAttempts = user.loginAttempts + 1;
+      const maxAttempts = 5;
+      const lockoutMinutes = 15;
+
+      if (newAttempts >= maxAttempts) {
+        const lockedUntil = new Date(Date.now() + lockoutMinutes * 60000);
+        try {
+          await this.prisma.user.update({
+            where: { id: user.id },
+            data: {
+              loginAttempts: newAttempts,
+              lockedUntil,
+            },
+          });
+        } catch (error) {
+          this.logger.error(`Database error updating login attempts for ${email}:`, error.message);
+        }
+        this.logger.warn(`Account locked due to ${maxAttempts} failed attempts - ${email}`);
+        throw new UnauthorizedException(`Account locked due to too many failed login attempts. Please try again in ${lockoutMinutes} minutes.`);
+      } else {
+        try {
+          await this.prisma.user.update({
+            where: { id: user.id },
+            data: { loginAttempts: newAttempts },
+          });
+        } catch (error) {
+          this.logger.error(`Database error updating login attempts for ${email}:`, error.message);
+        }
+        const remainingAttempts = maxAttempts - newAttempts;
+        this.logger.warn(`Login failed: Invalid password - ${email} (${newAttempts}/${maxAttempts} attempts, ${remainingAttempts} remaining)`);
+        throw new UnauthorizedException(`Invalid credentials. ${remainingAttempts} attempt(s) remaining before account lockout.`);
+      }
+    }
+
+    // Reset login attempts on successful password verification
+    if (user.loginAttempts > 0 || user.lockedUntil) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          loginAttempts: 0,
+          lockedUntil: null,
+        },
+      });
     }
 
     await this.issueOtp(user.id, user.email, 'LOGIN');
@@ -168,23 +251,39 @@ export class AuthService {
   async verifyOtp(email: string, code: string, purpose: 'REGISTER' | 'LOGIN' | 'RESET_PASSWORD') {
     this.logger.log(`OTP verification attempt for email: ${email}, purpose: ${purpose}`);
 
-    const user = (await this.prisma.user.findUnique({
-      where: { email },
-    })) as any;
+    let user: any;
+    try {
+      user = (await this.prisma.user.findUnique({
+        where: { email },
+      })) as any;
+    } catch (error) {
+      this.logger.error(`Database error finding user for ${email}:`, error.message);
+      throw new InternalServerErrorException(
+        'Unable to connect to the database. Please try again later.',
+      );
+    }
 
     if (!user) {
       this.logger.warn(`OTP verification failed: User not found - ${email}`);
       throw new UnauthorizedException('Invalid OTP');
     }
 
-    const otp = await this.prisma.otpCode.findUnique({
-      where: {
-        userId_purpose: {
-          userId: user.id,
-          purpose,
+    let otp: any;
+    try {
+      otp = await this.prisma.otpCode.findUnique({
+        where: {
+          userId_purpose: {
+            userId: user.id,
+            purpose,
+          },
         },
-      },
-    });
+      });
+    } catch (error) {
+      this.logger.error(`Database error finding OTP for ${email}:`, error.message);
+      throw new InternalServerErrorException(
+        'Unable to verify OTP. Please try again later.',
+      );
+    }
 
     if (!otp) {
       this.logger.warn(`OTP verification failed: No OTP found - ${email}`);
@@ -203,10 +302,14 @@ export class AuthService {
 
     const ok = await bcrypt.compare(code, otp.codeHash);
     if (!ok) {
-      await this.prisma.otpCode.update({
-        where: { id: otp.id },
-        data: { attempts: otp.attempts + 1 },
-      });
+      try {
+        await this.prisma.otpCode.update({
+          where: { id: otp.id },
+          data: { attempts: otp.attempts + 1 },
+        });
+      } catch (error) {
+        this.logger.error(`Database error updating OTP attempts for ${email}:`, error.message);
+      }
       this.logger.warn(`OTP verification failed: Invalid code - ${email} (Attempt ${otp.attempts + 1})`);
       throw new UnauthorizedException('Invalid OTP');
     }
@@ -274,9 +377,16 @@ export class AuthService {
       }
     }
 
-    await this.issueOtp(user.id, user.email, purpose);
+    try {
+      await this.issueOtp(user.id, user.email, purpose);
+    } catch (error) {
+      this.logger.error(`Failed to resend OTP to ${email}:`, error.message);
+      throw error;
+    }
+
     return {
       ok: true,
+      message: 'OTP code sent to your email',
     };
   }
 
@@ -286,7 +396,12 @@ export class AuthService {
     })) as any;
 
     if (user) {
-      await this.issueOtp(user.id, user.email, 'RESET_PASSWORD');
+      try {
+        await this.issueOtp(user.id, user.email, 'RESET_PASSWORD');
+      } catch (error) {
+        this.logger.error(`Failed to send password reset OTP to ${email}:`, error.message);
+        throw error;
+      }
     }
 
     return {

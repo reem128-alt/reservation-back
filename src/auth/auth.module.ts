@@ -4,7 +4,6 @@ import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
-import { PrismaService } from './prisma.service';
 import { JwtStrategy } from './jwt.strategy';
 import { LocalStrategy } from './local.strategy';
 import { NotificationModule } from '../notification/notification.module';
@@ -25,8 +24,8 @@ import { NotificationModule } from '../notification/notification.module';
       }),
     }),
   ],
-  providers: [AuthService, PrismaService, JwtStrategy, LocalStrategy],
+  providers: [AuthService, JwtStrategy, LocalStrategy],
   controllers: [AuthController],
-  exports: [AuthService, PrismaService],
+  exports: [AuthService],
 })
 export class AuthModule {}

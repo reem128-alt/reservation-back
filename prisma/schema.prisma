@@ -16,6 +16,8 @@ model User {
   notificationsEnabled Boolean @default(true)
   role          Role      @default(USER)
   image         String?
+  loginAttempts Int       @default(0)
+  lockedUntil   DateTime?
   bookings      Booking[]
   otpCodes      OtpCode[]
   paymentMethods PaymentMethod[]
