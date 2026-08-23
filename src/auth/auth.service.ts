@@ -7,6 +7,7 @@ import { LoginDto } from '../shared/dto/login.dto';
 import { NotificationService } from '../notification/notification.service';
 import { CustomLoggerService } from '../shared/logger/logger.service';
 import { ConfigService } from '@nestjs/config';
+import { RedisService } from '../redis/redis.service';
 
 @Injectable()
 export class AuthService {
@@ -16,6 +17,7 @@ export class AuthService {
     private notificationService: NotificationService,
     private logger: CustomLoggerService,
     private configService: ConfigService,
+    private redisService: RedisService,
   ) {
     this.logger.setContext('AuthService');
   }
@@ -53,28 +55,16 @@ export class AuthService {
   ) {
     const code = this.generateOtpCode();
     const codeHash = await bcrypt.hash(code, 10);
-    const expiresAt = this.otpExpiresAt(10);
-
-    await this.prisma.otpCode.upsert({
-      where: {
-        userId_purpose: {
-          userId,
-          purpose,
-        },
-      },
-      update: {
-        codeHash,
-        attempts: 0,
-        lastSentAt: new Date(),
-        expiresAt,
-      },
-      create: {
-        userId,
-        purpose,
-        codeHash,
-        expiresAt,
-      },
-    });
+    
+    const redisKey = `${email}:${purpose}`;
+    const otpData = {
+      userId,
+      codeHash,
+      attempts: 0,
+      createdAt: new Date().toISOString(),
+    };
+    
+    await this.redisService.set(redisKey, JSON.stringify(otpData), 600);
 
     try {
       await this.notificationService.sendOtpEmail(email, code, purpose);
@@ -268,58 +258,35 @@ export class AuthService {
       throw new UnauthorizedException('Invalid OTP');
     }
 
-    let otp: any;
-    try {
-      otp = await this.prisma.otpCode.findUnique({
-        where: {
-          userId_purpose: {
-            userId: user.id,
-            purpose,
-          },
-        },
-      });
-    } catch (error) {
-      this.logger.error(`Database error finding OTP for ${email}:`, error.message);
-      throw new InternalServerErrorException(
-        'Unable to verify OTP. Please try again later.',
-      );
-    }
+    const redisKey = `${email}:${purpose}`;
+    const otpDataStr = await this.redisService.get<string>(redisKey);
 
-    if (!otp) {
+    if (!otpDataStr) {
       this.logger.warn(`OTP verification failed: No OTP found - ${email}`);
-      throw new UnauthorizedException('Invalid OTP');
+      throw new UnauthorizedException('Invalid or expired OTP');
     }
 
-    if (otp.expiresAt.getTime() < Date.now()) {
-      this.logger.warn(`OTP verification failed: OTP expired - ${email}`);
-      throw new UnauthorizedException('OTP expired');
-    }
+    const otpData = JSON.parse(otpDataStr);
 
-    if (otp.attempts >= 5) {
+    if (otpData.attempts >= 5) {
       this.logger.warn(`OTP verification failed: Too many attempts - ${email}`);
+      await this.redisService.delete(redisKey);
       throw new UnauthorizedException('Too many attempts');
     }
 
-    const ok = await bcrypt.compare(code, otp.codeHash);
+    const ok = await bcrypt.compare(code, otpData.codeHash);
     if (!ok) {
-      try {
-        await this.prisma.otpCode.update({
-          where: { id: otp.id },
-          data: { attempts: otp.attempts + 1 },
-        });
-      } catch (error) {
-        this.logger.error(`Database error updating OTP attempts for ${email}:`, error.message);
-      }
-      this.logger.warn(`OTP verification failed: Invalid code - ${email} (Attempt ${otp.attempts + 1})`);
+      otpData.attempts += 1;
+      await this.redisService.set(redisKey, JSON.stringify(otpData), 600);
+      this.logger.warn(`OTP verification failed: Invalid code - ${email} (Attempt ${otpData.attempts})`);
       throw new UnauthorizedException('Invalid OTP');
     }
 
     this.logger.log(`OTP verified successfully for ${email}`);
 
+    await this.redisService.delete(redisKey);
+
     if (purpose === 'RESET_PASSWORD') {
-      await this.prisma.otpCode.delete({
-        where: { id: otp.id },
-      });
       return {
         ok: true,
       };
@@ -331,10 +298,6 @@ export class AuthService {
         data: { emailVerified: true },
       });
     }
-
-    await this.prisma.otpCode.delete({
-      where: { id: otp.id },
-    });
 
     const token = this.jwtService.sign({ 
       userId: user.id, 
@@ -361,18 +324,14 @@ export class AuthService {
       throw new UnauthorizedException('Invalid user');
     }
 
-    const existing = await this.prisma.otpCode.findUnique({
-      where: {
-        userId_purpose: {
-          userId: user.id,
-          purpose,
-        },
-      },
-    });
+    const redisKey = `${email}:${purpose}`;
+    const existingOtpStr = await this.redisService.get<string>(redisKey);
 
-    if (existing) {
+    if (existingOtpStr) {
+      const existingOtp = JSON.parse(existingOtpStr);
       const cooldownMs = 60 * 1000;
-      if (existing.lastSentAt.getTime() + cooldownMs > Date.now()) {
+      const createdAt = new Date(existingOtp.createdAt).getTime();
+      if (createdAt + cooldownMs > Date.now()) {
         throw new UnauthorizedException('Please wait before requesting another code');
       }
     }
@@ -421,37 +380,27 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const otp = await this.prisma.otpCode.findUnique({
-      where: {
-        userId_purpose: {
-          userId: user.id,
-          purpose: 'RESET_PASSWORD',
-        },
-      },
-    });
+    const redisKey = `${email}:RESET_PASSWORD`;
+    const otpDataStr = await this.redisService.get<string>(redisKey);
 
-    if (!otp) {
+    if (!otpDataStr) {
       this.logger.warn(`Password reset failed: No OTP found - ${email}`);
       throw new UnauthorizedException('Invalid or expired reset code');
     }
 
-    if (otp.expiresAt.getTime() < Date.now()) {
-      this.logger.warn(`Password reset failed: OTP expired - ${email}`);
-      throw new UnauthorizedException('Reset code expired');
-    }
+    const otpData = JSON.parse(otpDataStr);
 
-    if (otp.attempts >= 5) {
+    if (otpData.attempts >= 5) {
       this.logger.warn(`Password reset failed: Too many attempts - ${email}`);
+      await this.redisService.delete(redisKey);
       throw new UnauthorizedException('Too many attempts');
     }
 
-    const ok = await bcrypt.compare(code, otp.codeHash);
+    const ok = await bcrypt.compare(code, otpData.codeHash);
     if (!ok) {
-      await this.prisma.otpCode.update({
-        where: { id: otp.id },
-        data: { attempts: otp.attempts + 1 },
-      });
-      this.logger.warn(`Password reset failed: Invalid code - ${email} (Attempt ${otp.attempts + 1})`);
+      otpData.attempts += 1;
+      await this.redisService.set(redisKey, JSON.stringify(otpData), 600);
+      this.logger.warn(`Password reset failed: Invalid code - ${email} (Attempt ${otpData.attempts})`);
       throw new UnauthorizedException('Invalid reset code');
     }
 
@@ -461,9 +410,7 @@ export class AuthService {
       data: { password: hashedPassword },
     });
 
-    await this.prisma.otpCode.delete({
-      where: { id: otp.id },
-    });
+    await this.redisService.delete(redisKey);
 
     this.logger.log(`Password reset successfully for ${email}`);
 

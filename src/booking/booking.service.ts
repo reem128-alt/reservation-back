@@ -11,6 +11,7 @@ import type {
 } from '../shared/events/booking.events';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CustomLoggerService } from '../shared/logger/logger.service';
+import { RedisService } from '../redis/redis.service';
 
 @Injectable()
 export class BookingService {
@@ -20,6 +21,7 @@ export class BookingService {
     private paymentService: PaymentService,
     private eventEmitter: EventEmitter2,
     private logger: CustomLoggerService,
+    private redisService: RedisService,
   ) {
     this.logger.setContext('BookingService');
   }
@@ -131,6 +133,8 @@ export class BookingService {
         resource: true,
       },
     });
+
+    await this.invalidateAvailabilityCache(resourceId, start, end);
 
     const paymentMethod = paymentMethodId
       ? await this.paymentService.syncPaymentMethod(booking.userId, paymentMethodId)
@@ -326,6 +330,9 @@ export class BookingService {
       },
     });
 
+    // Invalidate availability cache
+    await this.invalidateAvailabilityCache(booking.resourceId, booking.startTime, booking.endTime);
+
     // Emit appropriate events
     if (status === 'CONFIRMED') {
       const bookingConfirmedEvent: BookingConfirmedEvent = {
@@ -355,5 +362,22 @@ export class BookingService {
 
   async confirm(id: number) {
     return this.updateStatus(id, 'CONFIRMED');
+  }
+
+  private async invalidateAvailabilityCache(resourceId: number, startTime: Date, endTime: Date) {
+    const dateStr = startTime.toISOString().split('T')[0];
+    const patterns = [
+      `availability:${resourceId}:*`,
+      `timeslots:${resourceId}:${dateStr}:*`,
+    ];
+
+    for (const pattern of patterns) {
+      try {
+        await this.redisService.delete(pattern);
+        this.logger.debug(`Invalidated cache pattern: ${pattern}`);
+      } catch (error) {
+        this.logger.warn(`Failed to invalidate cache pattern ${pattern}:`, error.message);
+      }
+    }
   }
 }

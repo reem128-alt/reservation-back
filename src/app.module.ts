@@ -20,6 +20,7 @@ import { ChatModule } from './chat/chat.module';
 import { LoggerModule } from './shared/logger/logger.module';
 import { HealthController } from './health/health.controller';
 import { PrismaModule } from './prisma/prisma.module';
+import { RedisModule } from './redis/redis.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { PrismaModule } from './prisma/prisma.module';
       limit: 10, // Max 10 requests per minute per IP
     }]),
     PrismaModule,
+    RedisModule,
     LoggerModule,
     AuthModule,
     ResourceTypeModule,

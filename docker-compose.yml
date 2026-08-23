@@ -1,0 +1,168 @@
+
+
+services:
+
+  # ==========================================
+  # NestJS Application
+  # ==========================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: reservation-api
+
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:5000:5000"
+
+    environment:
+
+      # ----------------------------------------
+      # Database - Supabase
+      # ----------------------------------------
+      DATABASE_URL: ${DATABASE_URL}
+      DIRECT_URL: ${DIRECT_URL}
+
+      # ----------------------------------------
+      # Security
+      # ----------------------------------------
+      NODE_TLS_REJECT_UNAUTHORIZED: ${NODE_TLS_REJECT_UNAUTHORIZED:-0}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+
+      # ----------------------------------------
+      # Application
+      # ----------------------------------------
+      APP_URL: ${APP_URL}
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 5000
+
+      # ----------------------------------------
+      # Redis
+      # ----------------------------------------
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+
+      # ----------------------------------------
+      # MailerSend
+      # ----------------------------------------
+      MAILERSEND_API_KEY: ${MAILERSEND_API_KEY}
+      MAILERSEND_FROM_EMAIL: ${MAILERSEND_FROM_EMAIL}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Reservation Platform}
+
+      # ----------------------------------------
+      # Stripe
+      # ----------------------------------------
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY}
+
+      # ----------------------------------------
+      # Cloudinary
+      # ----------------------------------------
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
+
+    depends_on:
+      redis:
+        condition: service_healthy
+
+    networks:
+      - reservation-network
+
+    volumes:
+      - ./logs:/usr/src/app/logs
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://127.0.0.1:5000/health"
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+
+  # ==========================================
+  # Redis
+  # ==========================================
+  redis:
+    image: redis:7-alpine
+
+    container_name: reservation-redis
+
+    restart: unless-stopped
+
+    volumes:
+      - redis-data:/data
+
+    networks:
+      - reservation-network
+
+    command: redis-server --appendonly yes
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "redis-cli",
+          "ping"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+  # ==========================================
+  # Nginx Reverse Proxy
+  # Optional - enabled with:
+  #
+  # docker compose --profile with-nginx up -d
+  # ==========================================
+  nginx:
+    image: nginx:alpine
+
+    container_name: reservation-nginx
+
+    restart: unless-stopped
+
+    ports:
+      - "80:80"
+      - "443:443"
+
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+
+    depends_on:
+      - app
+
+    networks:
+      - reservation-network
+
+    profiles:
+      - with-nginx
+
+
+# ==========================================
+# Docker Network
+# ==========================================
+networks:
+  reservation-network:
+    driver: bridge
+
+
+# ==========================================
+# Persistent Volumes
+# ==========================================
+volumes:
+  redis-data:
+    driver: local

@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../auth/prisma.service';
 import { CreateAvailabilityDto } from '../shared/dto/create-availability.dto';
+import { RedisService } from '../redis/redis.service';
 
 @Injectable()
 export class AvailabilityService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private redisService: RedisService,
+  ) {}
 
   private overlaps(startA: Date, endA: Date, startB: Date, endB: Date) {
     return startA < endB && endA > startB;
@@ -72,6 +76,13 @@ export class AvailabilityService {
   }
 
   async checkAvailability(resourceId: number, startTime: Date, endTime: Date) {
+    const cacheKey = `availability:${resourceId}:${startTime.toISOString()}:${endTime.toISOString()}`;
+    
+    const cached = await this.redisService.get<string>(cacheKey);
+    if (cached) {
+      return JSON.parse(cached);
+    }
+
     // Check if resource exists
     const resource = await this.prisma.resource.findUnique({
       where: { id: resourceId },
@@ -115,7 +126,7 @@ export class AvailabilityService {
       },
     });
 
-    return {
+    const result = {
       available: overlappingBookings.length === 0,
       resourceId,
       requestedTime: {
@@ -130,6 +141,9 @@ export class AvailabilityService {
       },
       conflictingBookings: overlappingBookings,
     };
+
+    await this.redisService.set(cacheKey, JSON.stringify(result), 300);
+    return result;
   }
 
   async getResourceSchedule(resourceId: number, date: Date) {
@@ -153,6 +167,14 @@ export class AvailabilityService {
   }
 
   async getAvailableTimeSlots(resourceId: number, date: Date, duration: number) {
+    const dateStr = date.toISOString().split('T')[0];
+    const cacheKey = `timeslots:${resourceId}:${dateStr}:${duration}`;
+    
+    const cached = await this.redisService.get<string>(cacheKey);
+    if (cached) {
+      return JSON.parse(cached);
+    }
+
     const schedules = await this.getResourceSchedule(resourceId, date);
     const bookings = await this.getBookingsForDate(resourceId, date);
 
@@ -200,7 +222,7 @@ export class AvailabilityService {
       availableSlots.push(...slotsWithCost);
     }
 
-    return {
+    const result = {
       resourceId,
       date,
       slotDurationMinutes: duration / (1000 * 60),
@@ -211,6 +233,9 @@ export class AvailabilityService {
       },
       availableSlots,
     };
+
+    await this.redisService.set(cacheKey, JSON.stringify(result), 300);
+    return result;
   }
 
   private async getBookingsForDate(resourceId: number, date: Date) {
