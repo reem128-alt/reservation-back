@@ -30,7 +30,8 @@ jobs:
 
       - name: Build application
         run: npm run build
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
 
       - name: Build Docker image
         run: docker build -t reservation-api:${{ github.sha }} .
-
