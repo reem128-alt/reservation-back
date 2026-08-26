@@ -6,11 +6,8 @@ services:
   # NestJS Application
   # ==========================================
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-
-    container_name: reservation-api
+       image: ghcr.io/reem128-alt/reservation-back:latest
+       container_name: reservation-api
 
     restart: unless-stopped
 
