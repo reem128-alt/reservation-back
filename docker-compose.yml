@@ -1,13 +1,12 @@
-
-
 services:
 
   # ==========================================
   # NestJS Application
   # ==========================================
   app:
-       image: ghcr.io/reem128-alt/reservation-back:latest
-       container_name: reservation-api
+    image: ghcr.io/reem128-alt/reservation-back:latest
+
+    container_name: reservation-api
 
     restart: unless-stopped
 
@@ -120,9 +119,7 @@ services:
 
   # ==========================================
   # Nginx Reverse Proxy
-  # Optional - enabled with:
-  #
-  # docker compose --profile with-nginx up -d
+  # Optional
   # ==========================================
   nginx:
     image: nginx:alpine
