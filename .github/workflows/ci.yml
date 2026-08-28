@@ -1,4 +1,4 @@
-name: CI
+name: CI/CD
 
 on:
   push:
@@ -9,13 +9,11 @@ on:
     branches:
       - main
 
-
 # Permissions required to read the repository
 # and push Docker images to GitHub Container Registry.
 permissions:
   contents: read
   packages: write
-
 
 jobs:
 
@@ -80,10 +78,7 @@ jobs:
 
 
       # --------------------------------------------------------
-      # Login to GitHub Container Registry
-      #
-      # Only login when pushing to main.
-      # Pull requests do not need to push images.
+      # Login to GHCR
       # --------------------------------------------------------
       - name: Login to GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -96,11 +91,49 @@ jobs:
 
       # --------------------------------------------------------
       # Push Docker image to GHCR
-      #
-      # Only runs after a push to main.
       # --------------------------------------------------------
       - name: Push Docker image to GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           docker push ghcr.io/${{ github.repository }}:${{ github.sha }}
           docker push ghcr.io/${{ github.repository }}:latest
+
+
+  # ==========================================================
+  # CD - Deploy to EC2
+  # ==========================================================
+  deploy:
+
+    name: Deploy to EC2
+
+    needs: test-and-build
+
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # --------------------------------------------------------
+      # SSH into EC2 and deploy
+      # --------------------------------------------------------
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /opt/reservation
+
+            echo "Pulling latest application image..."
+            docker compose pull app
+
+            echo "Starting updated application..."
+            docker compose up -d app
+
+            echo "Removing unused Docker images..."
+            docker image prune -f
+
+            echo "Deployment completed!"
+            docker ps
