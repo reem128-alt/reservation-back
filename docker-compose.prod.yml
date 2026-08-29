@@ -1,12 +1,10 @@
-version: '3.8'
-
 services:
   app:
-    image: reemhas/reem-image:reservation-api
+    image: ghcr.io/reem128-alt/reservation-back:latest
     container_name: reservation-api-prod
     restart: always
-    ports:
-      - "5000:5000"
+    expose:
+      - "5000"
     environment:
       DATABASE_URL: ${DATABASE_URL}
       DIRECT_URL: ${DIRECT_URL}
@@ -30,11 +28,6 @@ services:
       - redis
     networks:
       - reservation-network
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
 
   redis:
     image: redis:7-alpine
@@ -47,6 +40,19 @@ services:
     networks:
       - reservation-network
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-your-redis-password}
+
+  nginx:
+    image: nginx:alpine
+    container_name: reservation-nginx
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - app
+    networks:
+      - reservation-network
 
 networks:
   reservation-network:
