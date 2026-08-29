@@ -39,7 +39,7 @@ services:
       - redis-data:/data
     networks:
       - reservation-network
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-your-redis-password}
+    command: redis-server --appendonly yes
 
   nginx:
     image: nginx:alpine
