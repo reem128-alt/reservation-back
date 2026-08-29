@@ -9,8 +9,6 @@ on:
     branches:
       - main
 
-# Permissions required to read the repository
-# and push Docker images to GitHub Container Registry.
 permissions:
   contents: read
   packages: write
@@ -26,49 +24,26 @@ jobs:
 
     steps:
 
-      # --------------------------------------------------------
-      # Checkout repository
-      # --------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-
-      # --------------------------------------------------------
-      # Setup Node.js
-      # --------------------------------------------------------
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 
-
-      # --------------------------------------------------------
-      # Install dependencies
-      # --------------------------------------------------------
       - name: Install dependencies
         run: npm ci
 
-
-      # --------------------------------------------------------
-      # Run tests
-      # --------------------------------------------------------
       - name: Run tests
         run: npm test -- --runInBand
 
-
-      # --------------------------------------------------------
-      # Build NestJS application
-      # --------------------------------------------------------
       - name: Build application
         run: npm run build
         env:
           DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
 
-
-      # --------------------------------------------------------
-      # Build Docker image
-      # --------------------------------------------------------
       - name: Build Docker image
         run: |
           docker build \
@@ -76,10 +51,6 @@ jobs:
             -t ghcr.io/${{ github.repository }}:latest \
             .
 
-
-      # --------------------------------------------------------
-      # Login to GHCR
-      # --------------------------------------------------------
       - name: Login to GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
@@ -88,10 +59,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-
-      # --------------------------------------------------------
-      # Push Docker image to GHCR
-      # --------------------------------------------------------
       - name: Push Docker image to GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
@@ -115,7 +82,25 @@ jobs:
     steps:
 
       # --------------------------------------------------------
-      # SSH into EC2 and deploy
+      # Checkout repository
+      # --------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # --------------------------------------------------------
+      # Copy deployment files to EC2
+      # --------------------------------------------------------
+      - name: Copy deployment files to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "docker-compose.prod.yml,nginx.conf"
+          target: "/opt/reservation"
+
+      # --------------------------------------------------------
+      # Deploy on EC2
       # --------------------------------------------------------
       - name: Deploy to EC2
         uses: appleboy/ssh-action@v1.2.2
@@ -126,14 +111,38 @@ jobs:
           script: |
             cd /opt/reservation
 
-            echo "Pulling latest application image..."
-            docker compose pull app
+            echo "======================================"
+            echo "Starting deployment..."
+            echo "======================================"
 
-            echo "Starting updated application..."
-            docker compose up -d app
+            echo "Checking deployment files..."
+            ls -la docker-compose.prod.yml
+            ls -la nginx.conf
+
+            echo "Pulling latest application image..."
+            docker compose -f docker-compose.prod.yml pull app
+
+            echo "Starting application, Redis and Nginx..."
+            docker compose -f docker-compose.prod.yml up -d
 
             echo "Removing unused Docker images..."
             docker image prune -f
 
-            echo "Deployment completed!"
+            echo "Waiting for containers..."
+            sleep 10
+
+            echo "======================================"
+            echo "Container status:"
+            echo "======================================"
+
             docker ps
+
+            echo "======================================"
+            echo "Nginx test:"
+            echo "======================================"
+
+            curl -i http://127.0.0.1/health
+
+            echo "======================================"
+            echo "Deployment completed successfully!"
+            echo "======================================"

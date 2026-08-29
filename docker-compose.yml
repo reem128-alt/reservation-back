@@ -1,6 +1,6 @@
 services:
   app:
-    image: reemhas/reem-image:reservation-api
+    image: ghcr.io/reem128-alt/reservation-back:latest
     container_name: reservation-api-prod
     restart: always
     expose:
