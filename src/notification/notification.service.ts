@@ -4,26 +4,32 @@ import type {
   BookingConfirmedEvent,
   BookingCanceledEvent,
 } from '../shared/events/booking.events';
-import { MailerSend, EmailParams, Sender, Recipient } from 'mailersend';
+import * as nodemailer from 'nodemailer';
 import { PrismaService } from '../auth/prisma.service';
 
 @Injectable()
 export class NotificationService {
-  private mailerSend: MailerSend | null;
+  private transporter: nodemailer.Transporter | null;
 
   constructor(private prisma: PrismaService) {
-    this.initializeMailerSend();
+    this.initializeMailer();
   }
 
-  private initializeMailerSend() {
-    if (process.env.MAILERSEND_API_KEY) {
-      this.mailerSend = new MailerSend({
-        apiKey: process.env.MAILERSEND_API_KEY,
+  private initializeMailer() {
+    if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+      this.transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: parseInt(process.env.SMTP_PORT || '587'),
+        secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
+        auth: {
+          user: process.env.SMTP_USER,
+          pass: process.env.SMTP_PASS,
+        },
       });
-      console.log('[EMAIL SERVICE] MailerSend initialized');
+      console.log('[EMAIL SERVICE] Nodemailer initialized with Gmail SMTP');
     } else {
-      console.log('[EMAIL SERVICE] No MailerSend API key found, using mock service');
-      this.mailerSend = null;
+      console.log('[EMAIL SERVICE] SMTP credentials not found, using mock service');
+      this.transporter = null;
     }
   }
 
@@ -118,33 +124,27 @@ export class NotificationService {
   }
 
   private async sendEmail(to: string, subject: string, html: string) {
-    if (!this.mailerSend) {
-      const error = 'Email service not configured. Please set MAILERSEND_API_KEY and MAILERSEND_FROM_EMAIL in environment variables.';
+    if (!this.transporter) {
+      const error = 'Email service not configured. Please set SMTP_HOST, SMTP_USER, and SMTP_PASS in environment variables.';
       console.error(`[EMAIL ERROR] ${error}`);
       throw new Error(error);
     }
 
     try {
-      console.log(`[MAILERSEND] Sending email to ${to} with subject: ${subject}`);
+      console.log(`[SMTP] Sending email to ${to} with subject: ${subject}`);
       
-      const sentFrom = new Sender(
-        process.env.MAILERSEND_FROM_EMAIL || 'noreply@trial-domain.mlsender.net',
-        process.env.EMAIL_FROM_NAME || 'Reservation System'
-      );
-      
-      const recipients = [new Recipient(to)];
-      
-      const emailParams = new EmailParams()
-        .setFrom(sentFrom)
-        .setTo(recipients)
-        .setSubject(subject)
-        .setHtml(html);
+      const mailOptions = {
+        from: `"${process.env.EMAIL_FROM_NAME || 'Reservation Platform'}" <${process.env.SMTP_USER}>`,
+        to,
+        subject,
+        html,
+      };
 
-      const response = await this.mailerSend.email.send(emailParams);
-      console.log('[MAILERSEND] Email sent successfully');
-      return { success: true, emailId: response.body.message_id };
+      const info = await this.transporter.sendMail(mailOptions);
+      console.log('[SMTP] Email sent successfully:', info.messageId);
+      return { success: true, emailId: info.messageId };
     } catch (error) {
-      console.error('[MAILERSEND] Failed to send email:', error);
+      console.error('[SMTP] Failed to send email:', error);
       throw new Error(`Failed to send email: ${error.message || 'Unknown error'}`);
     }
   }
